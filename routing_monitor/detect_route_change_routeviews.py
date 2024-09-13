@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 from datetime import datetime, timedelta
 import pickle
-from joblib import Parallel, delayed
+import click
 
 import sys
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -34,7 +34,11 @@ def detect(data, route_change_dir, snapshot_dir):
         if time == "2345":
             pickle.dump(mon, open(snapshot_dir/f"{date}.end-of-the-day", "wb"))
 
-def detect_monthly_for(collector, months, num_workers):
+@click.command()
+@click.option("--collector", "-c", type=str, default="wide", help="the name of RouteView collector to use")
+@click.option("--year", "-y", type=int, required=True, help="the year to monitor, e.g., 2024")
+@click.option("--month", "-m", type=int, required=True, help="the month to monitor, e.g., 8")
+def detect_monthly_for(collector, year, month):
     result_dir = SCRIPT_DIR/"detection_result"/collector
     route_change_dir = result_dir/"route_change"
     snapshot_dir = result_dir/"snapshot"
@@ -44,18 +48,14 @@ def detect_monthly_for(collector, months, num_workers):
 
     collectors2url = get_all_collectors()
 
-    def get_time_range(month):
-        d1 = datetime(year=2023, month=month, day=1)
-        d2 = (datetime(year=2023, month=month, day=28) + timedelta(days=4)
-                ).replace(day=1) - timedelta(minutes=15)
-        return d1, d2
+    d1 = datetime(year=year, month=month, day=1)
+    d2 = (datetime(year=year, month=month, day=28) + timedelta(days=4)
+            ).replace(day=1) - timedelta(minutes=15)
 
-    monthly_data = [list(map(lambda url: download_data(url, collector),
+    monthly_data = list(map(lambda url: download_data(url, collector),
                     get_archive_list(collector, collectors2url, d1, d2)))
-                    for d1,d2 in map(get_time_range, months)]
 
-    Parallel(backend="multiprocessing", n_jobs=num_workers, verbose=10)(
-            delayed(detect)(data, route_change_dir, snapshot_dir)
-            for data in monthly_data)
+    detect(monthly_data, route_change_dir, snapshot_dir)
 
-detect_monthly_for("wide", range(2,9), 7)
+if __name__ == "__main__":
+    detect_monthly_for()
