@@ -1,4 +1,5 @@
 *.swp
+*.vim
 
 data/routeviews/updates
 data/routeviews/ribs

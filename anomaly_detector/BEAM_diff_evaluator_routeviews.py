@@ -3,26 +3,32 @@
 
 from functools import lru_cache
 from pathlib import Path
-from datetime import datetime
 import pandas as pd
-from joblib import Parallel, delayed
+import click
 
 from utils import load_emb_distance
 
 repo_dir = Path(__file__).resolve().parent.parent
-route_change_dir = repo_dir/"routing_monitor"/"detection_result"/"wide"/"route_change"
-beam_metric_dir = repo_dir/"routing_monitor"/"detection_result"/"wide"/"BEAM_metric"
 model_dir = repo_dir/"BEAM_engine"/"models"
 
-beam_metric_dir.mkdir(exist_ok=True, parents=True)
+@click.command()
+@click.option("--collector", "-c", type=str, default="wide", help="the name of RouteView collector that the route changes to evaluate are from")
+@click.option("--year", "-y", type=int, required=True, help="the year of the route changes monitored, e.g., 2024")
+@click.option("--month", "-m", type=int, required=True, help="the month of the route changes monitored, e.g., 8")
+@click.option("--beam-model", "-b", type=str, required=True, help="the trained BEAM model to use, e.g., 20240801.as-rel2.1000.10.128")
+def evaluate_monthly_for(collector, year, month, beam_model):
+    collector_result_dir = repo_dir/"routing_monitor"/"detection_result"/collector
+    route_change_dir = collector_result_dir/"route_change"
+    beam_metric_dir = collector_result_dir/"BEAM_metric"
+    beam_metric_dir.mkdir(exist_ok=True, parents=True)
 
-train_dir = model_dir/"20230201.as-rel2.local.1000.10.128"
-emb_d, dtw_d, path_d, emb, _, _ = load_emb_distance(train_dir, return_emb=True)
-def dtw_d_only_exist(s, t):
-    return dtw_d([i for i in s if i in emb], [i for i in t if i in emb])
+    emb_dir = model_dir/beam_model
+    emb_d, dtw_d, path_d, emb, _, _ = load_emb_distance(emb_dir, return_emb=True)
 
-def evaluate_monthly_for(ym):
-    for i in route_change_dir.glob(f"{ym}*.csv"):
+    def dtw_d_only_exist(s, t):
+        return dtw_d([i for i in s if i in emb], [i for i in t if i in emb])
+
+    for i in route_change_dir.glob(f"{year}{month:02d}*.csv"):
         beam_metric_file = beam_metric_dir/f"{i.stem}.bm.csv"
         if beam_metric_file.exists(): continue
 
@@ -44,5 +50,5 @@ def evaluate_monthly_for(ym):
         
         metrics.to_csv(beam_metric_file, index=False)
 
-Parallel(backend="multiprocessing", n_jobs=7, verbose=10)(
-        delayed(evaluate_monthly_for)(f"2023{m:02}") for m in range(2,9))
+if __name__ == "__main__":
+    evaluate_monthly_for()

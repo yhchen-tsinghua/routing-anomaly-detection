@@ -8,16 +8,13 @@ from utils import approx_knee_point, event_aggregate
 import json
 import pandas as pd
 import numpy as np
-import time
+import click
 
 repo_dir = Path(__file__).resolve().parent.parent
-route_change_dir = repo_dir/"routing_monitor"/"detection_result"/"wide"/"route_change"
-beam_metric_dir = repo_dir/"routing_monitor"/"detection_result"/"wide"/"BEAM_metric"
-reported_alarm_dir = repo_dir/"routing_monitor"/"detection_result"/"wide"/"reported_alarms"
 
-def load_montly_data(ym, preprocessor=lambda df: df):
-    route_change_files = sorted(route_change_dir.glob(f"{ym}*.csv"))
-    beam_metric_files = sorted(beam_metric_dir.glob(f"{ym}*.csv"))
+def load_monthly_data(year, month, preprocessor=lambda df: df):
+    route_change_files = sorted(route_change_dir.glob(f"{year}{month:02d}*.csv"))
+    beam_metric_files = sorted(beam_metric_dir.glob(f"{year}{month:02d}*.bm.csv"))
     datetimes = [i.stem.replace(".","")[:-2] for i in route_change_files]
 
     bulk_datetimes, bulk_indices = np.unique(datetimes, return_index=True)
@@ -98,35 +95,40 @@ def window(df0, df1, # df0 for reference, df1 for detection
 
     return info, df
 
-def report_alarm_monthly(ym, metric):
+@click.command()
+@click.option("--collector", "-c", type=str, default="wide", help="the name of RouteView collector to detect anomalies")
+@click.option("--year", "-y", type=int, required=True, help="the year of the route changes monitored, e.g., 2024")
+@click.option("--month", "-m", type=int, required=True, help="the month of the route changes monitored, e.g., 8")
+def report_alarm_monthly(collector, year, month):
+    collector_result_dir = repo_dir/"routing_monitor"/"detection_result"/collector
+    route_change_dir = collector_result_dir/"route_change"
+    beam_metric_dir = collector_result_dir/"BEAM_metric"
+    reported_alarm_dir = collector_result_dir/"reported_alarms"/f"{year}{month:02d}"
+    reported_alarm_dir.mkdir(parents=True, exist_ok=True)
+
     def preprocessor(df):
         df["diff_balance"] = df["diff"]/(df["path_d1"]+df["path_d2"])
-        # NOTE: add more metrics here if needed
         return df
 
-    save_dir = reported_alarm_dir/metric/ym
-    save_dir.mkdir(parents=True, exist_ok=True)
-
-    datetimes, bulks = load_montly_data(ym, preprocessor)
+    datetimes, bulks = load_monthly_data(year, month, preprocessor)
     indices = np.arange(len(bulks))
     infos = []
 
     for i, j in list(zip(indices[:-1], indices[1:])):
         info = dict(d0=datetimes[i], d1=datetimes[j])
-        _info, df = window(bulks[i], bulks[j], metric=metric)
+        _info, df = window(bulks[i], bulks[j], metric="diff_balance")
         info.update(**_info)
 
         if df is None:
             info.update(save_path=None)
         else: 
-            save_path = save_dir/f"{datetimes[i]}_{datetimes[j]}.alarms.csv"
+            save_path = reported_alarm_dir/f"{datetimes[i]}_{datetimes[j]}.alarms.csv"
             df.to_csv(save_path, index=False)
             info.update(save_path=str(save_path))
 
         infos.append(info)
 
-    json.dump(infos, open(save_dir/f"info_{ym}.json", "w"), indent=2)
+    json.dump(infos, open(reported_alarm_dir/f"info_{year}{month:02d}.json", "w"), indent=2)
 
-Parallel(backend="multiprocessing", n_jobs=7, verbose=10)(
-        delayed(report_alarm_monthly)(f"2023{m:02}", "diff_balance")
-        for m in range(2,9))
+if __name__ == "__main__":
+    report_alarm_monthly()
