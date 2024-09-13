@@ -8,17 +8,23 @@ from pathlib import Path
 from datetime import datetime
 import subprocess 
 import calendar
+import click
 
 import sys
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 from anomaly_detector.utils import event_aggregate
 
-def main(month, metric):
+@click.command()
+@click.option("--collector", "-c", type=str, default="wide", help="the name of RouteView collector to generate the report")
+@click.option("--year", "-y", type=int, required=True, help="the year of the detection results, e.g., 2024")
+@click.option("--month", "-m", type=int, required=True, help="the month of the detection results, e.g., 8")
+def main(collector, year, month):
     repo_dir = Path(__file__).resolve().parent.parent
-    reported_alarm_dir = repo_dir/"routing_monitor"/"detection_result"/"wide"/"reported_alarms"/metric/f"2023{month:02}"
-    route_change_dir = repo_dir/"routing_monitor"/"detection_result"/"wide"/"route_change"
-    info = json.load(open(reported_alarm_dir/f"info_2023{month:02}.json", "r"))
-    flags_dir = repo_dir/"routing_monitor"/"detection_result"/"wide"/"reported_alarms"/metric/f"2023{month:02}.flags"
+    collector_result_dir = repo_dir/"routing_monitor"/"detection_result"/collector
+    reported_alarm_dir = collector_result_dir/"reported_alarms"/f"{year}{month:02d}"
+    route_change_dir = collector_result_dir/"route_change"
+    info = json.load(open(reported_alarm_dir/f"info_{year}{month:02}.json", "r"))
+    flags_dir = reported_alarm_dir.parent/f"{year}{month:02d}.flags"
 
     summary_dir = Path(__file__).resolve().parent/"summary_output"
     summary_dir.mkdir(parents=True, exist_ok=True)
@@ -143,7 +149,7 @@ def main(month, metric):
                 dfs.append(df)
 
         df = pd.concat(dfs)
-        df.to_csv(summary_dir/f"alarms_after_post_process_2023{month:02}.csv", index=False)
+        df.to_csv(summary_dir/f"alarms_after_post_process_{collector}_{year}{month:02}.csv", index=False)
         return df
 
     df = summary()
@@ -310,7 +316,7 @@ def main(month, metric):
             jl = json_checkout(group_id, group)
             lines.append(json.dumps(jl))
 
-        with open(summary_dir/f"alarms_2023{month:02}.jsonl", "w") as f:
+        with open(summary_dir/f"alarms_{collector}_{year}{month:02}.jsonl", "w") as f:
             f.write("\n".join(lines)+"\n")
 
         print(f"total groups: {group_id+1}")
@@ -321,7 +327,7 @@ def main(month, metric):
             terminal_checkout(group_id, group)
 
     def stats_checkout(df):
-        daily_cnts = np.zeros(calendar.monthrange(2023, int(month))[1], dtype=int)
+        daily_cnts = np.zeros(calendar.monthrange(year, int(month))[1], dtype=int)
         daily_cnts_a = daily_cnts.copy()
 
         days = [datetime.fromtimestamp(np.min(g["timestamp"])).day for _,g in df.groupby("group_id")]
@@ -334,7 +340,7 @@ def main(month, metric):
         days_a, cnts_a = np.unique(days_a, return_counts=True)
         daily_cnts_a[days_a-1] = cnts_a
 
-        route_change_cnts = int(subprocess.run(f"wc -l {route_change_dir}/2023{month:02}*.csv", shell=True,
+        route_change_cnts = int(subprocess.run(f"wc -l {route_change_dir}/{year}{month:02}*.csv", shell=True,
                                 stdout=subprocess.PIPE, encoding='UTF-8').stdout.strip().split()[-2])
 
         return daily_cnts, daily_cnts_a, route_change_cnts
@@ -346,11 +352,11 @@ def main(month, metric):
             sections.append(html)
         template = open(html_dir/"template_routeviews.html", "r").read()
         html = template.replace("REPLACE_WITH_SECTIONS", "\n".join(sections))
-        html = html.replace("REPLACE_WITH_TITLE", f"Month-{month} Report（RouteViews）")
+        html = html.replace("REPLACE_WITH_TITLE", f"{year}-{month} Report（RouteViews {collector}）")
         
 
         daily_cnts, daily_cnts_a, route_change_cnts = stats_checkout(df)
-        xvalues = "["+", ".join([f"{i+1:02}" for i in range(calendar.monthrange(2023, int(month))[1])])+"]"
+        xvalues = "["+", ".join([f"{i+1:02}" for i in range(calendar.monthrange(year, int(month))[1])])+"]"
         yvalues_a = "["+", ".join([f"{i+1:02}" for i in daily_cnts_a])+"]"
         yvalues_b = "["+", ".join([f"{i+1:02}" for i in daily_cnts-daily_cnts_a])+"]"
 
@@ -364,11 +370,11 @@ def main(month, metric):
 
         html = html.replace("REPLACE_WITH_EXPLANATION", exp)
 
-        open(html_dir/f"report_{month:02}.html", "w").write(html)
+        open(html_dir/f"report_{collector}_{year}{month:02}.html", "w").write(html)
 
     gen_jsonl()
     # terminal_display()
     gen_html()
 
-for m in range(2,9):
-    main(m, "diff_balance")
+if __name__ == "__main__":
+    main()

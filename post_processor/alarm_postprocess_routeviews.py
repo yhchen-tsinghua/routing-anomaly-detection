@@ -4,8 +4,8 @@
 from pathlib import Path
 import pandas as pd
 import numpy as np
-from joblib import Parallel, delayed
 import json
+import click
 
 from rpki_validation_request import rpki_valid
 
@@ -181,15 +181,19 @@ def origin_rpki_valid(prefix, path):
 def path_superset(path1, path2):
     return ",".join(path1) in ",".join(path2)
 
-
-def postprocess(metric, ym):
-    as_info, org_info, from_same_org, get_asn_country = load_as_org("20230101")
-    as_rel_map, get_as_rel, have_connection = load_as_rel("1", 20230101)
+@click.command()
+@click.option("--collector", "-c", type=str, default="wide", help="the name of RouteView collector to postprocess the detection results")
+@click.option("--year", "-y", type=int, required=True, help="the year of the detection results, e.g., 2024")
+@click.option("--month", "-m", type=int, required=True, help="the month of the detection results, e.g., 8")
+def postprocess(collector, year, month):
+    as_info, org_info, from_same_org, get_asn_country = load_as_org(f"{year}{month:02d}01")
+    as_rel_map, get_as_rel, have_connection = load_as_rel("1", f"{year}{month:02d}01")
 
     repo_dir = Path(__file__).resolve().parent.parent
-    reported_alarm_dir = repo_dir/"routing_monitor"/"detection_result"/"wide"/"reported_alarms"/metric/ym
-    info = json.load(open(reported_alarm_dir/f"info_{ym}.json", "r"))
-    flags_dir = reported_alarm_dir.parent/f"{ym}.flags"
+    collector_result_dir = repo_dir/"routing_monitor"/"detection_result"/collector
+    reported_alarm_dir = collector_result_dir/"reported_alarms"/f"{year}{month:02d}"
+    info = json.load(open(reported_alarm_dir/f"info_{year}{month:02d}.json", "r"))
+    flags_dir = reported_alarm_dir.parent/f"{year}{month:02d}.flags"
     flags_dir.mkdir(parents=True, exist_ok=True)
     
     for i in info:
@@ -228,5 +232,5 @@ def postprocess(metric, ym):
         })
         flags.to_csv(flags_dir/f"{Path(i['save_path']).stem}.flags.csv", index=False)
 
-Parallel(backend="multiprocessing", n_jobs=7, verbose=10)(
-        delayed(postprocess)("diff_balance", f"2023{m:02}") for m in range(2,9))
+if __name__ == "__main__":
+    postprocess()
