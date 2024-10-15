@@ -22,3 +22,6 @@ routing_monitor/detection_result
 
 post_processor/rpki_cache/
 post_processor/rpki_cache
+
+experiment/detection_result/
+experiment/detection_result
