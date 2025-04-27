@@ -4,7 +4,7 @@
 from pathlib import Path
 from joblib import Parallel, delayed
 from concurrent.futures import ThreadPoolExecutor
-from utils import approx_knee_point, event_aggregate
+from .utils import approx_knee_point, event_aggregate
 import json
 import pandas as pd
 import numpy as np
@@ -35,7 +35,7 @@ def metric_threshold(df, metric_col):
     values = df[metric_col]
     mu = np.mean(values)
     sigma = np.std(values)
-    metric_th = mu+4*sigma
+    metric_th = mu+1*sigma
 
     print("reference metric: ")
     print(values.describe())
@@ -56,7 +56,9 @@ def forwarder_threshold(df, event_key):
 
 def window(df0, df1, # df0 for reference, df1 for detection
         metric="diff", event_key=["prefix1", "prefix2"],
-        dedup_index=["prefix1", "prefix2", "forwarder", "path1", "path2"]):
+        dedup_index=["prefix1", "prefix2", "forwarder", "path1", "path2"],
+        metric_threshold=metric_threshold,
+        forwarder_threshold=forwarder_threshold):
 
     if dedup_index is not None:
         df0 = df0.drop_duplicates(dedup_index, keep="first", inplace=False, ignore_index=True)
