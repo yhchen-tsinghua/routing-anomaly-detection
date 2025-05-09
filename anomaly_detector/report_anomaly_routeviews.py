@@ -11,6 +11,8 @@ import numpy as np
 import click
 
 repo_dir = Path(__file__).resolve().parent.parent
+route_change_dir = None
+beam_metric_dir = None
 
 def load_monthly_data(year, month, preprocessor=lambda df: df):
     route_change_files = sorted(route_change_dir.glob(f"{year}{month:02d}*.csv"))
@@ -100,6 +102,7 @@ def window(df0, df1, # df0 for reference, df1 for detection
 @click.option("--year", "-y", type=int, required=True, help="the year of the route changes monitored, e.g., 2024")
 @click.option("--month", "-m", type=int, required=True, help="the month of the route changes monitored, e.g., 8")
 def report_alarm_monthly(collector, year, month):
+    global route_change_dir, beam_metric_dir
     collector_result_dir = repo_dir/"routing_monitor"/"detection_result"/collector
     route_change_dir = collector_result_dir/"route_change"
     beam_metric_dir = collector_result_dir/"BEAM_metric"

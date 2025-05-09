@@ -6,8 +6,12 @@ import pandas as pd
 import numpy as np
 import json
 import click
+from functools import lru_cache
+from datetime import datetime, timedelta
 
-from rpki_validation_request import rpki_valid
+from rpki_validator import RPKI
+from irr_validator import RADB
+from whois_lookup import whois_match
 
 import sys
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -17,6 +21,11 @@ from data.caida_as_rel.fetch_data import get as as_rel_file
 
 def get_one_asn(asn):
     return asn.strip("{}").split(",")[0]
+
+def get_recent_monday(date_str):
+    date = datetime.strptime(date_str, "%Y%m%d").date()
+    monday = date - timedelta(days=date.weekday())
+    return monday
 
 def load_as_org(time):
     time, fpath = as_org_file(time)
@@ -101,15 +110,18 @@ def have_unknown_asn(path, as_rel_map):
     return "-"
 
 def have_reserved_asn(path):
+    # reserved ASN (last updated: 2024-04-10)
+    # https://www.iana.org/assignments/as-numbers/as-numbers.xhtml
     ret = []
     for i in path:
         i = int(i)
-        if i == 0 \
-                or i == 112 \
-                or i == 23456 \
-                or (i >= 64496 and i <= 65534) \
-                or i == 65535 \
-                or (i >= 65536 and i <= 65551):
+        if (i == 0 or i == 112 or i == 23456 or
+           (i >= 64496  and i <= 131071) or
+           (i >= 153914 and i <= 196607) or
+           (i >= 216476 and i <= 262143) or
+           (i >= 274845 and i <= 327679) or
+           (i >= 329728 and i <= 393215) or
+            i >= 402333):
             ret.append(str(i))
     if ret:
         return ";".join(set(ret))
@@ -175,11 +187,31 @@ def origin_different_upstream(path1, path2, get_as_rel):
         return f"{path1[-2]};{path2[-2]}"
     return "-"
 
-def origin_rpki_valid(prefix, path):
-    return rpki_valid(prefix, path[-1])
+def origin_rpki_valid(rpki, prefix, path):
+    return rpki.validate(prefix, path[-1])
+
+def origin_irr_valid(radb, prefix, path):
+    return radb.validate(prefix, path[-1])
+
+def origin_whois_match(prefix, path):
+    return whois_match(prefix, path[-1])
 
 def path_superset(path1, path2):
     return ",".join(path1) in ",".join(path2)
+
+@lru_cache(maxsize=10)
+def _get_rpki(date):
+    return RPKI().load_data(date.year, date.month, date.day)
+
+def get_rpki(date):
+    return _get_rpki(get_recent_monday(date))
+
+@lru_cache(maxsize=10)
+def _get_radb(date):
+    return RADB().load_data(date.year, date.month, date.day)
+
+def get_radb(date):
+    return _get_radb(get_recent_monday(date))
 
 @click.command()
 @click.option("--collector", "-c", type=str, default="wide", help="the name of RouteView collector to postprocess the detection results")
@@ -195,7 +227,7 @@ def postprocess(collector, year, month):
     info = json.load(open(reported_alarm_dir/f"info_{year}{month:02d}.json", "r"))
     flags_dir = reported_alarm_dir.parent/f"{year}{month:02d}.flags"
     flags_dir.mkdir(parents=True, exist_ok=True)
-    
+
     for i in info:
         if i["save_path"] is None: continue
         df = pd.read_csv(i["save_path"])
@@ -207,6 +239,9 @@ def postprocess(collector, year, month):
         non_valley_free_1, none_rel_1 = np.array(list(map(lambda x: non_valley_free_or_none_rel(x, get_as_rel), path1))).T
         non_valley_free_2, none_rel_2 = np.array(list(map(lambda x: non_valley_free_or_none_rel(x, get_as_rel), path2))).T
 
+        rpki = get_rpki(i["d0"][:8])
+        radb = get_radb(i["d0"][:8])
+
         flags = pd.DataFrame.from_dict({
             "subprefix_change": [p1 != p2 for p1, p2 in zip(prefix1, prefix2)],
             "origin_change": [l1[-1] != l2[-1] for l1, l2 in zip(path1, path2)],
@@ -214,8 +249,12 @@ def postprocess(collector, year, month):
             "origin_country_change": [different_origin_country(l1, l2, get_asn_country) for l1, l2 in zip(path1, path2)],
             "origin_connection": [have_origin_connection(l1, l2, have_connection) for l1, l2 in zip(path1, path2)],
             "origin_different_upstream": [origin_different_upstream(l1, l2, get_as_rel) for l1, l2 in zip(path1, path2)],
-            "origin_rpki_1": [origin_rpki_valid(p, l) for p, l in zip(prefix1, path1)],
-            "origin_rpki_2": [origin_rpki_valid(p, l) for p, l in zip(prefix2, path2)],
+            "origin_rpki_1": [origin_rpki_valid(rpki, p, l) for p, l in zip(prefix1, path1)],
+            "origin_rpki_2": [origin_rpki_valid(rpki, p, l) for p, l in zip(prefix2, path2)],
+            "origin_irr_1": [origin_irr_valid(radb, p, l) for p, l in zip(prefix1, path1)],
+            "origin_irr_2": [origin_irr_valid(radb, p, l) for p, l in zip(prefix2, path2)],
+            "origin_whois_1": [origin_whois_match(p, l) for p, l in zip(prefix1, path1)],
+            "origin_whois_2": [origin_whois_match(p, l) for p, l in zip(prefix2, path2)],
             "unknown_asn_1": [have_unknown_asn(l, as_rel_map) for l in path1],
             "unknown_asn_2": [have_unknown_asn(l, as_rel_map) for l in path2],
             "reserved_path_1": [have_reserved_asn(l) for l in path1],
