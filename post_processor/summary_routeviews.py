@@ -31,12 +31,14 @@ def main(collector, year, month):
 
     html_dir = Path(__file__).resolve().parent/"html"
 
+    metric = "diff_balance"
+
     def has_flag(v):
         return v != "-"
     v_flag = np.vectorize(has_flag)
 
     def invalid_asn(v):
-        return v == "invalid_asn"
+        return v == "Invalid"
     v_invalid_asn = np.vectorize(invalid_asn)
 
     def invalid_len(v):
@@ -59,8 +61,11 @@ def main(collector, year, month):
             # highly possible origin hijack
             anomaly_t1 = df["origin_change"] \
                             & (~v_flag(df["origin_same_org"])) \
-                            & (v_invalid_asn(df["origin_rpki_1"])
+                            & ((v_invalid_asn(df["origin_rpki_1"])
                                 ^ v_invalid_asn(df["origin_rpki_2"]))
+                               | (v_invalid_asn(df["origin_irr_1"])
+                                ^ v_invalid_asn(df["origin_irr_2"]))
+                               | (df["origin_whois_1"] ^ df["origin_whois_2"]))
 
             # highly possible route leak
             anomaly_t2 = v_flag(df["non_valley_free_1"]) \
@@ -77,12 +82,13 @@ def main(collector, year, month):
                             & (v_flag(df["none_rel_1"]) \
                                 | v_flag(df["none_rel_2"]))
 
-            # highly possible ROA misconfiguration
+            # highly possible ROA/IRR/WHOIS misconfiguration
             anomaly_t4 = v_flag(df["origin_same_org"]) \
-                            & (v_invalid_len(df["origin_rpki_1"])
-                                | v_invalid_len(df["origin_rpki_2"])
-                                | (v_invalid_asn(df["origin_rpki_1"])
-                                    ^ v_invalid_asn(df["origin_rpki_2"])))
+                            & ((v_invalid_asn(df["origin_rpki_1"])
+                                ^ v_invalid_asn(df["origin_rpki_2"]))
+                               | (v_invalid_asn(df["origin_irr_1"])
+                                ^ v_invalid_asn(df["origin_irr_2"]))
+                               | (df["origin_whois_1"] ^ df["origin_whois_2"]))
 
             # highly possible benign MOAS
             benign_t1 = df["origin_change"] \
@@ -156,14 +162,14 @@ def main(collector, year, month):
 
     def reason(tag, row):
         if tag == "a1":
-            fields = ["origin_rpki_1", "origin_rpki_2"]
+            fields = ["origin_rpki_1", "origin_rpki_2", "origin_irr_1", "origin_irr_2", "origin_whois_1", "origin_whois_2"]
         elif tag == "a2":
             fields = ["non_valley_free_1", "non_valley_free_2"]
         elif tag == "a3":
             fields = ["reserved_path_1", "reserved_path_2",
                         "none_rel_1", "none_rel_2", "unknown_asn_1", "unknown_asn_2"]
         elif tag == "a4":
-            fields = ["origin_same_org", "origin_rpki_1", "origin_rpki_2"]
+            fields = ["origin_same_org", "origin_rpki_1", "origin_rpki_2", "origin_irr_1", "origin_irr_2", "origin_whois_1", "origin_whois_2"]
         elif tag == "b1":
             fields = ["origin_same_org", "origin_connection",
                         "origin_rpki_1", "origin_rpki_2"]
